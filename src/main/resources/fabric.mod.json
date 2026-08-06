@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "pearl-catch",
+  "version": "${version}",
+  "name": "Pearl Catch",
+  "description": "Meteor Client addon that throws an ender pearl and times a wind charge to intercept it in flight.",
+  "authors": [
+    "alittledwarf"
+  ],
+  "icon": "assets/pearl-catch/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "meteor": [
+      "com.pearlcatch.PearlCatchAddon"
+    ]
+  },
+  "custom": {
+    "meteor-client:color": "25,225,25",
+    "modmenu": {
+      "parent": {
+        "id": "meteor-client"
+      }
+    }
+  },
+  "depends": {
+    "java": ">=21",
+    "minecraft": ["${mc_version}"],
+    "meteor-client": "*"
+  }
+}
