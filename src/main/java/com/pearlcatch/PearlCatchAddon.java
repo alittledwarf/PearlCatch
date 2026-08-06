@@ -2,6 +2,7 @@ package com.pearlcatch;
 
 import com.mojang.logging.LogUtils;
 import com.pearlcatch.modules.PearlCatchHorizontal;
+import com.pearlcatch.modules.StrongholdFinder;
 import com.pearlcatch.modules.WindJump;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.systems.modules.Category;
@@ -18,6 +19,7 @@ public class PearlCatchAddon extends MeteorAddon {
 
         Modules.get().add(new PearlCatchHorizontal());
         Modules.get().add(new WindJump());
+        Modules.get().add(new StrongholdFinder());
     }
 
     @Override
