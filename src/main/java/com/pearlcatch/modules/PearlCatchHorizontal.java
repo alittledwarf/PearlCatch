@@ -100,6 +100,22 @@ public class PearlCatchHorizontal extends Module {
         .build()
     );
 
+    private final Setting<Boolean> compensateMotion = sgTiming.add(new BoolSetting.Builder()
+        .name("compensate-motion")
+        .description("Account for the fact that a thrown wind charge inherits your own velocity. Turn off to compare against the old behaviour.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Double> fireDelay = sgTiming.add(new DoubleSetting.Builder()
+        .name("fire-delay-ticks")
+        .description("Ticks between solving and the charge actually leaving your hand. Matters while moving, since you travel in that gap.")
+        .defaultValue(1.0)
+        .range(0.0, 5.0)
+        .sliderRange(0.0, 5.0)
+        .build()
+    );
+
     private final Setting<Integer> giveUpTicks = sgTiming.add(new IntSetting.Builder()
         .name("give-up-ticks")
         .description("Abort if no intercept is found within this many ticks of throwing.")
@@ -143,6 +159,8 @@ public class PearlCatchHorizontal extends Module {
     // ---------------- State ----------------
 
     private final ProjectileEntitySimulator simulator = new ProjectileEntitySimulator();
+
+    private record Aim(double yaw, double pitch, Vec3d point) {}
 
     private boolean tracking = false;
     private boolean keyWasDown = false;
@@ -190,15 +208,14 @@ public class PearlCatchHorizontal extends Module {
         EnderPearlEntity pearl = findOwnPearl();
         if (pearl == null) return; // entity has not reached the client yet
 
-        Vec3d intercept = solveIntercept(pearl);
-        if (intercept == null) return;
+        Aim aim = solveIntercept(pearl);
+        if (aim == null) return;
 
-        target = intercept;
+        target = aim.point();
         targetAge = 0;
         tracking = false;
 
-        Vec3d aim = intercept.subtract(0, aimOffsetY.get(), 0);
-        Rotations.rotate(Rotations.getYaw(aim), Rotations.getPitch(aim), 50, this::throwWindCharge);
+        Rotations.rotate(aim.yaw(), aim.pitch(), 50, this::throwWindCharge);
     }
 
     private void start() {
@@ -240,14 +257,31 @@ public class PearlCatchHorizontal extends Module {
     }
 
     /**
-     * Steps the pearl forward with Meteor's simulator. At each future tick t, checks
-     * whether a wind charge fired right now would take about t ticks to reach that point.
-     * Returns the first point where the two line up.
+     * Steps the pearl forward with Meteor's simulator and solves for the throw direction.
+     *
+     * A thrown wind charge leaves the hand at 1.5 blocks per tick along your aim, plus
+     * whatever velocity you already had. So its true velocity is dir*1.5 + ownVelocity,
+     * and it flies dead straight from there. For an intercept at tick t we need:
+     *
+     *     origin + (dir*1.5 + ownVelocity) * flight = pearlPos(t)
+     *
+     * Rearranged, dir*1.5 = (pearlPos - origin)/flight - ownVelocity. That vector has to
+     * come out 1.5 blocks long, which is the condition we search for. Aiming straight at
+     * the pearl only works when you are standing still.
      */
-    private Vec3d solveIntercept(EnderPearlEntity pearl) {
+    private Aim solveIntercept(EnderPearlEntity pearl) {
         if (!simulator.set(pearl)) return null;
 
-        Vec3d eye = mc.player.getEyePos();
+        Vec3d pv = mc.player.getVelocity();
+        Vec3d ownVel = compensateMotion.get()
+            ? new Vec3d(pv.x, mc.player.isOnGround() ? 0 : pv.y, pv.z)
+            : Vec3d.ZERO;
+
+        double delay = fireDelay.get();
+
+        // Where our hand will be by the time the charge is actually released
+        Vec3d origin = mc.player.getEyePos().add(ownVel.multiply(delay));
+
         int lookahead = maxLookahead.get();
         double tol = tolerance.get();
         int lead = minLead.get();
@@ -256,10 +290,23 @@ public class PearlCatchHorizontal extends Module {
             SimulationStep step = simulator.tick();
 
             Vec3d pos = new Vec3d(simulator.pos.x, simulator.pos.y, simulator.pos.z);
+            Vec3d aimPoint = pos.subtract(0, aimOffsetY.get(), 0);
 
-            if (t >= lead) {
-                double flightTicks = eye.distanceTo(pos) / WIND_CHARGE_SPEED;
-                if (Math.abs(flightTicks - t) <= tol) return pos;
+            double flight = t - delay;
+
+            if (t >= lead && flight > 0) {
+                Vec3d needed = aimPoint.subtract(origin).multiply(1.0 / flight).subtract(ownVel);
+                double speed = needed.length();
+
+                // Does a real wind charge move fast enough, and not too fast, to make this?
+                if (speed > 1e-6 && Math.abs(speed - WIND_CHARGE_SPEED) / WIND_CHARGE_SPEED <= tol / 5.0) {
+                    Vec3d dir = needed.normalize();
+
+                    double yaw = Math.toDegrees(Math.atan2(-dir.x, dir.z));
+                    double pitch = Math.toDegrees(-Math.asin(Math.max(-1.0, Math.min(1.0, dir.y))));
+
+                    return new Aim(yaw, pitch, pos);
+                }
             }
 
             // Pearl hit something, no point simulating further
